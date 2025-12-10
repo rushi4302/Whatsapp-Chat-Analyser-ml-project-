@@ -157,6 +157,12 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# Initialize session state for dataframe
+if 'df' not in st.session_state:
+    st.session_state.df = None
+if 'user_list' not in st.session_state:
+    st.session_state.user_list = []
+
 # Sidebar
 with st.sidebar:
     st.markdown("<h1 style='text-align: center; margin-bottom: 30px;'>💬 Chat Analyzer</h1>", unsafe_allow_html=True)
@@ -168,26 +174,45 @@ with st.sidebar:
     )
     
     if uploaded_file is not None:
-        bytes_data = uploaded_file.getvalue()
-        data = bytes_data.decode("utf-8")
-        df = preprocessor.preprocesdata(data)
-        
-        user_list = df['user'].unique().tolist()
-        if 'group_notification' in user_list:
-            user_list.remove('group_notification')
-        user_list.insert(0, "Overall")
-        
-        st.markdown("---")
-        st.markdown("### 👤 Select User")
-        selected_user = st.selectbox("", user_list, label_visibility="collapsed")
-        
-        st.markdown("---")
-        analyze_button = st.button("🚀 Analyze Chat", use_container_width=True)
+        try:
+            # Read and decode the file
+            bytes_data = uploaded_file.getvalue()
+            data = bytes_data.decode("utf-8", errors='ignore')
+            
+            # Process the data
+            with st.spinner("Processing chat data..."):
+                df = preprocessor.preprocesdata(data)
+                st.session_state.df = df
+                
+                # Get user list
+                user_list = df['user'].unique().tolist()
+                if 'group_notification' in user_list:
+                    user_list.remove('group_notification')
+                user_list.sort()
+                user_list.insert(0, "Overall")
+                st.session_state.user_list = user_list
+            
+            st.success(f"✅ Successfully loaded {len(df)} messages!")
+            
+            st.markdown("---")
+            st.markdown("### 👤 Select User")
+            selected_user = st.selectbox("", st.session_state.user_list, label_visibility="collapsed")
+            
+            st.markdown("---")
+            analyze_button = st.button("🚀 Analyze Chat", use_container_width=True)
+            
+        except Exception as e:
+            st.error(f"❌ Error processing file: {str(e)}")
+            st.error("Please make sure you uploaded a valid WhatsApp chat export file.")
+            st.info("**Tip:** The file should be a .txt file exported from WhatsApp.")
+            analyze_button = False
+            st.session_state.df = None
     else:
         analyze_button = False
+        selected_user = None
 
 # Main content
-if uploaded_file is None:
+if uploaded_file is None or st.session_state.df is None:
     # Welcome Screen
     st.markdown("""
         <div class="welcome-container">
@@ -253,160 +278,167 @@ if uploaded_file is None:
         5. Upload the exported .txt file using the sidebar
     """)
 
-elif analyze_button:
-    # Statistics Section
-    st.markdown("<div class='section-header'>📊 Top Statistics</div>", unsafe_allow_html=True)
+elif analyze_button and st.session_state.df is not None:
+    df = st.session_state.df
     
-    num_messages, words, num_media_messages, links = helper.fetch_stats(selected_user, df)
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric(label="💬 Total Messages", value=f"{num_messages:,}")
-    with col2:
-        st.metric(label="📝 Total Words", value=f"{words:,}")
-    with col3:
-        st.metric(label="📷 Media Shared", value=f"{num_media_messages:,}")
-    with col4:
-        st.metric(label="🔗 Links Shared", value=f"{links:,}")
-    
-    # Timeline Section
-    st.markdown("<div class='section-header'>📈 Activity Timelines</div>", unsafe_allow_html=True)
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("#### 📅 Monthly Timeline")
-        timeline = helper.monthly_timeline(selected_user, df)
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.plot(timeline['time'], timeline['message'], color='#667eea', linewidth=2.5, marker='o')
-        ax.fill_between(timeline['time'], timeline['message'], alpha=0.3, color='#667eea')
-        plt.xticks(rotation=45, ha='right')
-        ax.set_xlabel('Time', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Messages', fontsize=12, fontweight='bold')
-        ax.grid(True, alpha=0.3, linestyle='--')
-        plt.tight_layout()
-        st.pyplot(fig)
-    
-    with col2:
-        st.markdown("#### 📆 Daily Timeline")
-        daily_timeline = helper.daily_timeline(selected_user, df)
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.plot(daily_timeline['only_date'], daily_timeline['message'], color='#764ba2', linewidth=2)
-        plt.xticks(rotation=45, ha='right')
-        ax.set_xlabel('Date', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Messages', fontsize=12, fontweight='bold')
-        ax.grid(True, alpha=0.3, linestyle='--')
-        plt.tight_layout()
-        st.pyplot(fig)
-    
-    # Activity Map Section
-    st.markdown("<div class='section-header'>🔥 Activity Patterns</div>", unsafe_allow_html=True)
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("#### 📅 Most Busy Day")
-        busy_day = helper.weak_activity_map(selected_user, df)
-        fig, ax = plt.subplots(figsize=(8, 5))
-        bars = ax.bar(busy_day.index, busy_day.values, color='#667eea', alpha=0.8)
-        ax.set_xlabel('Day', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Messages', fontsize=12, fontweight='bold')
-        plt.xticks(rotation=45)
-        ax.grid(True, alpha=0.3, axis='y', linestyle='--')
-        plt.tight_layout()
-        st.pyplot(fig)
-    
-    with col2:
-        st.markdown("#### 📊 Most Busy Month")
-        busy_month = helper.monthly_activity_map(selected_user, df)
-        fig, ax = plt.subplots(figsize=(8, 5))
-        bars = ax.bar(busy_month.index, busy_month.values, color='#764ba2', alpha=0.8)
-        ax.set_xlabel('Month', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Messages', fontsize=12, fontweight='bold')
-        plt.xticks(rotation=45)
-        ax.grid(True, alpha=0.3, axis='y', linestyle='--')
-        plt.tight_layout()
-        st.pyplot(fig)
-    
-    st.markdown("#### 🗓️ Weekly Activity Heatmap")
-    user_heatmap = helper.activity_heatmap(selected_user, df)
-    fig, ax = plt.subplots(figsize=(12, 6))
-    sns.heatmap(user_heatmap, cmap='YlOrRd', linewidths=0.5, cbar_kws={'label': 'Messages'})
-    plt.xlabel('Hour', fontsize=12, fontweight='bold')
-    plt.ylabel('Day', fontsize=12, fontweight='bold')
-    plt.tight_layout()
-    st.pyplot(fig)
-    
-    # Busiest Users (Only for Overall)
-    if selected_user == 'Overall':
-        st.markdown("<div class='section-header'>👥 Most Active Users</div>", unsafe_allow_html=True)
-        x, new_df = helper.most_busy_users(df)
+    try:
+        # Statistics Section
+        st.markdown("<div class='section-header'>📊 Top Statistics</div>", unsafe_allow_html=True)
         
-        col1, col2 = st.columns([2, 1])
+        num_messages, words, num_media_messages, links = helper.fetch_stats(selected_user, df)
+        
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            fig, ax = plt.subplots(figsize=(10, 6))
-            bars = ax.bar(x.index, x.values, color='#667eea', alpha=0.8)
-            ax.set_xlabel('User', fontsize=12, fontweight='bold')
-            ax.set_ylabel('Messages', fontsize=12, fontweight='bold')
+            st.metric(label="💬 Total Messages", value=f"{num_messages:,}")
+        with col2:
+            st.metric(label="📝 Total Words", value=f"{words:,}")
+        with col3:
+            st.metric(label="📷 Media Shared", value=f"{num_media_messages:,}")
+        with col4:
+            st.metric(label="🔗 Links Shared", value=f"{links:,}")
+        
+        # Timeline Section
+        st.markdown("<div class='section-header'>📈 Activity Timelines</div>", unsafe_allow_html=True)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### 📅 Monthly Timeline")
+            timeline = helper.monthly_timeline(selected_user, df)
+            fig, ax = plt.subplots(figsize=(10, 5))
+            ax.plot(timeline['time'], timeline['message'], color='#667eea', linewidth=2.5, marker='o')
+            ax.fill_between(timeline['time'], timeline['message'], alpha=0.3, color='#667eea')
             plt.xticks(rotation=45, ha='right')
+            ax.set_xlabel('Time', fontsize=12, fontweight='bold')
+            ax.set_ylabel('Messages', fontsize=12, fontweight='bold')
+            ax.grid(True, alpha=0.3, linestyle='--')
+            plt.tight_layout()
+            st.pyplot(fig)
+        
+        with col2:
+            st.markdown("#### 📆 Daily Timeline")
+            daily_timeline = helper.daily_timeline(selected_user, df)
+            fig, ax = plt.subplots(figsize=(10, 5))
+            ax.plot(daily_timeline['only_date'], daily_timeline['message'], color='#764ba2', linewidth=2)
+            plt.xticks(rotation=45, ha='right')
+            ax.set_xlabel('Date', fontsize=12, fontweight='bold')
+            ax.set_ylabel('Messages', fontsize=12, fontweight='bold')
+            ax.grid(True, alpha=0.3, linestyle='--')
+            plt.tight_layout()
+            st.pyplot(fig)
+        
+        # Activity Map Section
+        st.markdown("<div class='section-header'>🔥 Activity Patterns</div>", unsafe_allow_html=True)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### 📅 Most Busy Day")
+            busy_day = helper.weak_activity_map(selected_user, df)
+            fig, ax = plt.subplots(figsize=(8, 5))
+            bars = ax.bar(busy_day.index, busy_day.values, color='#667eea', alpha=0.8)
+            ax.set_xlabel('Day', fontsize=12, fontweight='bold')
+            ax.set_ylabel('Messages', fontsize=12, fontweight='bold')
+            plt.xticks(rotation=45)
             ax.grid(True, alpha=0.3, axis='y', linestyle='--')
             plt.tight_layout()
             st.pyplot(fig)
         
         with col2:
-            st.markdown("#### 📋 User Statistics")
-            st.dataframe(new_df, use_container_width=True, height=400)
-    
-    # Word Analysis Section
-    st.markdown("<div class='section-header'>💭 Word Analysis</div>", unsafe_allow_html=True)
-    
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.markdown("#### ☁️ Word Cloud")
-        df_wc = helper.create_worldcloud(selected_user, df)
-        fig, ax = plt.subplots(figsize=(10, 8))
-        ax.imshow(df_wc, interpolation='bilinear')
-        ax.axis('off')
+            st.markdown("#### 📊 Most Busy Month")
+            busy_month = helper.monthly_activity_map(selected_user, df)
+            fig, ax = plt.subplots(figsize=(8, 5))
+            bars = ax.bar(busy_month.index, busy_month.values, color='#764ba2', alpha=0.8)
+            ax.set_xlabel('Month', fontsize=12, fontweight='bold')
+            ax.set_ylabel('Messages', fontsize=12, fontweight='bold')
+            plt.xticks(rotation=45)
+            ax.grid(True, alpha=0.3, axis='y', linestyle='--')
+            plt.tight_layout()
+            st.pyplot(fig)
+        
+        st.markdown("#### 🗓️ Weekly Activity Heatmap")
+        user_heatmap = helper.activity_heatmap(selected_user, df)
+        fig, ax = plt.subplots(figsize=(12, 6))
+        sns.heatmap(user_heatmap, cmap='YlOrRd', linewidths=0.5, cbar_kws={'label': 'Messages'})
+        plt.xlabel('Hour', fontsize=12, fontweight='bold')
+        plt.ylabel('Day', fontsize=12, fontweight='bold')
         plt.tight_layout()
         st.pyplot(fig)
-    
-    with col2:
-        st.markdown("#### 📊 Most Common Words")
-        most_common_df = helper.most_common_words(selected_user, df)
-        fig, ax = plt.subplots(figsize=(10, 8))
-        colors = plt.cm.viridis(range(len(most_common_df)))
-        ax.barh(most_common_df['word'], most_common_df['count'], color=colors)
-        ax.set_xlabel('Count', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Words', fontsize=12, fontweight='bold')
-        ax.grid(True, alpha=0.3, axis='x', linestyle='--')
-        plt.tight_layout()
-        st.pyplot(fig)
-    
-    # Emoji Analysis Section
-    st.markdown("<div class='section-header'>😊 Emoji Analysis</div>", unsafe_allow_html=True)
-    
-    emoji_df = helper.emoji_helper(selected_user, df)
-    
-    if not emoji_df.empty:
+        
+        # Busiest Users (Only for Overall)
+        if selected_user == 'Overall':
+            st.markdown("<div class='section-header'>👥 Most Active Users</div>", unsafe_allow_html=True)
+            x, new_df = helper.most_busy_users(df)
+            
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                fig, ax = plt.subplots(figsize=(10, 6))
+                bars = ax.bar(x.index, x.values, color='#667eea', alpha=0.8)
+                ax.set_xlabel('User', fontsize=12, fontweight='bold')
+                ax.set_ylabel('Messages', fontsize=12, fontweight='bold')
+                plt.xticks(rotation=45, ha='right')
+                ax.grid(True, alpha=0.3, axis='y', linestyle='--')
+                plt.tight_layout()
+                st.pyplot(fig)
+            
+            with col2:
+                st.markdown("#### 📋 User Statistics")
+                st.dataframe(new_df, use_container_width=True, height=400)
+        
+        # Word Analysis Section
+        st.markdown("<div class='section-header'>💭 Word Analysis</div>", unsafe_allow_html=True)
+        
         col1, col2 = st.columns([1, 1])
         
         with col1:
-            st.markdown("#### 📊 Emoji Usage Table")
-            st.dataframe(emoji_df, use_container_width=True, height=400)
+            st.markdown("#### ☁️ Word Cloud")
+            df_wc = helper.create_worldcloud(selected_user, df)
+            fig, ax = plt.subplots(figsize=(10, 8))
+            ax.imshow(df_wc, interpolation='bilinear')
+            ax.axis('off')
+            plt.tight_layout()
+            st.pyplot(fig)
         
         with col2:
-            st.markdown("#### 🥧 Top 5 Emojis")
-            fig, ax = plt.subplots(figsize=(8, 8))
-            colors = ['#667eea', '#764ba2', '#f093fb', '#4facfe', '#43e97b']
-            ax.pie(emoji_df[1].head(), labels=emoji_df[0].head(), autopct="%0.2f%%", 
-                   colors=colors, startangle=90, textprops={'fontsize': 12, 'fontweight': 'bold'})
-            ax.axis('equal')
+            st.markdown("#### 📊 Most Common Words")
+            most_common_df = helper.most_common_words(selected_user, df)
+            fig, ax = plt.subplots(figsize=(10, 8))
+            colors = plt.cm.viridis(range(len(most_common_df)))
+            ax.barh(most_common_df['word'], most_common_df['count'], color=colors)
+            ax.set_xlabel('Count', fontsize=12, fontweight='bold')
+            ax.set_ylabel('Words', fontsize=12, fontweight='bold')
+            ax.grid(True, alpha=0.3, axis='x', linestyle='--')
+            plt.tight_layout()
             st.pyplot(fig)
-    else:
-        st.info("No emojis found in the selected chat!")
+        
+        # Emoji Analysis Section
+        st.markdown("<div class='section-header'>😊 Emoji Analysis</div>", unsafe_allow_html=True)
+        
+        emoji_df = helper.emoji_helper(selected_user, df)
+        
+        if not emoji_df.empty:
+            col1, col2 = st.columns([1, 1])
+            
+            with col1:
+                st.markdown("#### 📊 Emoji Usage Table")
+                st.dataframe(emoji_df, use_container_width=True, height=400)
+            
+            with col2:
+                st.markdown("#### 🥧 Top 5 Emojis")
+                fig, ax = plt.subplots(figsize=(8, 8))
+                colors = ['#667eea', '#764ba2', '#f093fb', '#4facfe', '#43e97b']
+                ax.pie(emoji_df[1].head(), labels=emoji_df[0].head(), autopct="%0.2f%%", 
+                       colors=colors, startangle=90, textprops={'fontsize': 12, 'fontweight': 'bold'})
+                ax.axis('equal')
+                st.pyplot(fig)
+        else:
+            st.info("No emojis found in the selected chat!")
+        
+    except Exception as e:
+        st.error(f"❌ An error occurred during analysis: {str(e)}")
+        st.info("Please try uploading the file again or contact support if the issue persists.")
     
     # Footer
     st.markdown("---")

@@ -2,66 +2,76 @@ import re
 import pandas as pd
 
 def preprocesdata(data):
-    # Updated pattern to match both 12-hour and 24-hour formats
+    # Enhanced pattern to match both 12-hour and 24-hour formats
+    # Handles both regular space and non-breaking space (\u202f)
     pattern = r'\d{1,2}/\d{1,2}/\d{2,4},\s\d{1,2}:\d{2}(?:\s|\u202f)?(?:am|pm|AM|PM)?\s-\s'
     
     messages = re.split(pattern, data)[1:]
     dates = re.findall(pattern, data)
     
-    # Clean non-breaking spaces
+    if len(messages) == 0 or len(dates) == 0:
+        raise ValueError("No messages found. Please check your WhatsApp chat format.")
+    
+    # Clean non-breaking spaces and extra whitespace
     clean_dates = [d.replace('\u202f', ' ').strip() for d in dates]
     
     df = pd.DataFrame({'user_message': messages, 'message_date': clean_dates})
     
-    # Detect format and parse accordingly
+    # Parse dates with multiple format attempts
     def parse_date(date_str):
         date_str = date_str.rstrip(' -').strip()
         
-        # Try 12-hour format first
-        for fmt in ['%d/%m/%y, %I:%M %p', '%d/%m/%Y, %I:%M %p', 
-                    '%d/%m/%y, %I:%M%p', '%d/%m/%Y, %I:%M%p']:
+        # List of possible formats
+        formats = [
+            '%d/%m/%y, %I:%M %p',    # 12-hour with space before AM/PM
+            '%d/%m/%Y, %I:%M %p',
+            '%d/%m/%y, %I:%M%p',     # 12-hour without space
+            '%d/%m/%Y, %I:%M%p',
+            '%d/%m/%y, %H:%M',       # 24-hour
+            '%d/%m/%Y, %H:%M',
+        ]
+        
+        for fmt in formats:
             try:
                 return pd.to_datetime(date_str, format=fmt)
             except:
                 continue
         
-        # Try 24-hour format
-        for fmt in ['%d/%m/%y, %H:%M', '%d/%m/%Y, %H:%M']:
-            try:
-                return pd.to_datetime(date_str, format=fmt)
-            except:
-                continue
-        
+        # If all formats fail, return NaT
         return pd.NaT
     
-    df['date'] = df['message_date'].apply(parse_date)
+    df['date_parsed'] = df['message_date'].apply(parse_date)
+    
+    # Check if parsing was successful
+    if df['date_parsed'].isna().all():
+        raise ValueError("Could not parse any dates. Please check your date format.")
     
     # Extract user and message
     users = []
-    messages = []
+    messages_list = []
     for message in df['user_message']:
-        entry = re.split(r'(^[^:]+):\s', message)
-        if len(entry) > 2:
+        entry = re.split(r'([\w\W]+?):\s', message, maxsplit=1)
+        if len(entry) == 3:  # Changed from >2 to ==3 for more precise matching
             users.append(entry[1])
-            messages.append(entry[2])
+            messages_list.append(entry[2])
         else:
             users.append('group_notification')
-            messages.append(entry[0])
+            messages_list.append(entry[0])
     
     df['user'] = users
-    df['message'] = messages
+    df['message'] = messages_list
     df.drop(columns=['user_message', 'message_date'], inplace=True)
     
-    # Extract date components
-    df['year'] = df['date'].dt.year.astype(str)
-    df['month'] = df['date'].dt.month.astype(str).str.zfill(2)
-    df['day'] = df['date'].dt.day.astype(str)
-    df['hour'] = df['date'].dt.hour.astype(str)
-    df['minute'] = df['date'].dt.minute.astype(str).str.zfill(2)
+    # Extract date components from parsed datetime
+    df['year'] = df['date_parsed'].dt.year.astype(str)
+    df['month'] = df['date_parsed'].dt.month.astype(str).str.zfill(2)
+    df['day'] = df['date_parsed'].dt.day.astype(str)
+    df['hour'] = df['date_parsed'].dt.hour.astype(str)
+    df['minute'] = df['date_parsed'].dt.minute.astype(str).str.zfill(2)
     
-    # Convert 24-hour to 12-hour format for display
-    df['hour_12'] = df['date'].dt.strftime('%I').str.lstrip('0')
-    df['period'] = df['date'].dt.strftime('%p')
+    # Convert to 12-hour format for display
+    df['hour_12'] = df['date_parsed'].dt.strftime('%I').str.lstrip('0').fillna('12')
+    df['period'] = df['date_parsed'].dt.strftime('%p').fillna('AM')
     
     # Month name mapping
     month_map = {
@@ -72,11 +82,15 @@ def preprocesdata(data):
     }
     df['month_name'] = df['month'].map(month_map)
     
-    # Format only_date and day_name
-    df['only_date'] = df['date'].dt.strftime('%d/%m/%y')
-    df['day_name'] = df['date'].dt.day_name()
+    # Format dates for reference
+    df['only_date'] = df['date_parsed'].dt.strftime('%d/%m/%y')
+    df['day_name'] = df['date_parsed'].dt.day_name()
+    df['date'] = df['date_parsed'].dt.strftime('%d/%m/%y, %I:%M %p')
     
-    # Keep original date column for reference
-    df['date'] = df['date'].dt.strftime('%d/%m/%y, %I:%M %p')
+    # Drop the temporary parsed column
+    df.drop(columns=['date_parsed'], inplace=True)
+    
+    # Remove any rows with NaN values in critical columns
+    df = df.dropna(subset=['year', 'month', 'day'])
     
     return df
