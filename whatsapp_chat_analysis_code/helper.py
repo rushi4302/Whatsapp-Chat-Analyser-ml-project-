@@ -21,6 +21,7 @@ from wordcloud import WordCloud
 import pandas as pd
 from collections import Counter
 import emoji
+import os
 extractor = URLExtract()
 
 def fetch_stats(selected_user, df):
@@ -54,7 +55,11 @@ def most_busy_users(df):
 
 
 def create_worldcloud(selected_user, df):
-    f = open("stop_hinglish.txt", "r")
+
+    # f = open("stop_hinglish.txt", "r")
+    # StopWords=f.read()
+    file_path = os.path.join(os.path.dirname(__file__), "stop_hinglish.txt")
+    f = open(file_path, "r")
     StopWords=f.read()
 
     if selected_user != 'Overall':
@@ -77,7 +82,10 @@ def create_worldcloud(selected_user, df):
     
 def most_common_words(selected_user, df):
 
-    f = open("stop_hinglish.txt", "r")
+    # f = open("stop_hinglish.txt", "r")
+    # StopWords=f.read()
+    file_path = os.path.join(os.path.dirname(__file__), "stop_hinglish.txt")
+    f = open(file_path, "r")
     StopWords=f.read()
 
     if selected_user != 'Overall':
@@ -198,3 +206,4 @@ def activity_heatmap(selected_user, df):
     heatmap = heatmap.reindex(columns=df['hour_range'].unique())
 
     return heatmap  
+
